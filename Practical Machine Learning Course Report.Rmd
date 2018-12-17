@@ -1,0 +1,137 @@
+---
+title: "Practical Machine Learning - Course Project"
+author: "James R. Francisco"
+date: "December 16, 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. 
+
+The goal of this research will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).The data will be used to evaluate how well they did the exercises.
+
+## Data Loading
+
+The data files were imported directly from the course archives. In this step, the files are loaded into the R Studio environment. The packages that will be used for the analysis are also loaded here. 
+```{r, message=FALSE,results='hide'}
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(RColorBrewer)
+library(rattle)
+library(randomForest)
+library(gbm)
+trainData <- read.csv('./pml-training.csv', header=T)
+validData <- read.csv('./pml-testing.csv', header=T)
+```
+```{r}
+dim(trainData)
+dim(validData)
+```
+
+
+
+## Data Preparation
+
+There are a large number of columns in thos data that either have no value or are very close to zero. Before creating the models and running the analysis this data needs to be cleaned. Also. the first seven columns of the data tables include metadata that is not relevant to the analysis. This data cleaning is performed on both the test and training datas.
+
+```{r}
+indColToRemove <- which(colSums(is.na(trainData) |trainData=="")>0.9*dim(trainData)[1]) 
+trainDataClean <- trainData[,-indColToRemove]
+trainDataClean <- trainDataClean[,-c(1:7)]
+dim(trainDataClean)
+
+indColToRemove <- which(colSums(is.na(validData) |validData=="")>0.9*dim(validData)[1]) 
+validDataClean <- validData[,-indColToRemove]
+validDataClean <- validDataClean[,-1]
+dim(validDataClean)
+```
+This phase of data preparation reduces the number of columns from 160 to 53.
+
+## Training Data Partitioning and partitioning
+
+In order to prepare the data for prediction, the original training data is partitioned in order to allow cross-validation and compute the out of sample error.
+```{r}
+set.seed(1234) 
+inTrain <- createDataPartition(trainDataClean$classe, p = 0.7, list = FALSE)
+trainData1 <- trainDataClean[inTrain, ]
+testData <- trainDataClean[-inTrain, ]
+dim(trainData1)
+dim(testData)
+```
+
+Then the data is processed to remove  any variables with near zero variance. The result indicates that 10 variables fall into that category. For the analysis of this data, we will test 3 different models : 
+* classification tree, * random forest, * gradient boosting method
+
+In order to limit the effects of overfitting, and improve the efficicency of the models, we will use the *cross-validation technique. We will use 5 folds (usually, 5 or 10 can be used, but 10 folds gives higher run times with no significant increase of the accuracy).
+
+## Classification Tree evaluation
+
+```{r}
+set.seed(12345)
+decisionTreeMod1 <- rpart(classe ~ ., data=trainData1, method="class")
+fancyRpartPlot(decisionTreeMod1)
+```
+the “decisionTreeModel” is validated on the testData to find out how well it performs by looking at the accuracy variable.
+
+```{r}
+predictTreeMod1 <- predict(decisionTreeMod1, testData, type = "class")
+cmtree <- confusionMatrix(predictTreeMod1, testData$classe)
+cmtree
+```
+We can notice that the accuracy of this first model is very low (about 69%). This means that the outcome class will not be predicted very well by the other predictors. Plotting the results shows the issue clearly.
+```{r}
+plot(cmtree$table, col = cmtree$byClass, 
+     main = paste("Decision Tree - Accuracy =", round(cmtree$overall['Accuracy'], 4)))
+```
+## Random Forest evaluation
+
+```{r}
+controlRF <- trainControl(method="cv", number=3, verboseIter=FALSE)
+modRF1 <- train(classe ~ ., data=trainData1, method="rf", trControl=controlRF)
+modRF1$finalModel
+```
+We then validate the model obtained model “modRF1” on the test data to find out how well it performs by looking at the Accuracy variable.
+
+```{r}
+predictRF1 <- predict(modRF1, newdata=testData)
+cmrf <- confusionMatrix(predictRF1, testData$classe)
+cmrf
+```
+The accuracy rate using the random forest is very high: Accuracy : 0.9944 and therefore the out-of-sample-error is equal to 0.0056.If we plot the model we get:
+```{r}
+plot(modRF1)
+```
+## Generalized Boosted Regression Model evaluation
+
+Another approach to a predictive model is to use a generalized boosted model (GBM). In this approach we use 5-fold reampling with one repetition.
+
+```{r}
+set.seed(12345)
+controlGBM <- trainControl(method = "repeatedcv", number = 5, repeats = 1)
+modGBM  <- train(classe ~ ., data=trainData1, method = "gbm", trControl = controlGBM, verbose = FALSE)
+modGBM$finalModel
+# print model summary
+print(modGBM)
+```
+Validation of the training data against the test partition reports the accuracy of this model.
+```{r}
+predictGBM <- predict(modGBM, newdata=testData)
+cmGBM <- confusionMatrix(predictGBM, testData$classe)
+cmGBM
+```
+The accuracy rate using the GBM approach is very high: Accuracy : 0.9633 and therefore the out-of-sample-error is equal to 0.0367. as good as that is, the Random Forest model is significantly more accurate, Therefore, the Random Forest model will be applied to the sample test data.
+
+## Random Forest modeling of the validation data
+
+```{r}
+Results <- predict(modRF1, newdata=validDataClean)
+Results
+```
+
+This result set will be used as the answers in the “Course Project Prediction Quiz”
